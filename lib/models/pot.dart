@@ -5,14 +5,14 @@ class Pot {
   List<SidePot> sidePots = [];
 
   /// 记录每个玩家的下注（在每一轮下注结束后调用，用于计算边池）
-  /// 输入：所有活跃玩家的下注额（currentBet）
+  /// 输入：所有活跃玩家的累计下注额（totalBetThisRound）
   void calculateSidePots(List<Player> players) {
     // 过滤出还在牌局中的玩家（未弃牌）
     final activePlayers = players.where((p) => p.isInHand).toList();
     if (activePlayers.isEmpty) return;
 
-    // 按照 currentBet 从小到大排序
-    activePlayers.sort((a, b) => a.currentBet.compareTo(b.currentBet));
+    // 按照 totalBetThisRound（整手牌累计下注）从小到大排序
+    activePlayers.sort((a, b) => a.totalBetThisRound.compareTo(b.totalBetThisRound));
 
     List<SidePot> newSidePots = [];
     int totalChipsInPot = 0;
@@ -27,7 +27,7 @@ class Pot {
 
     for (int i = 0; i < activePlayers.length; i++) {
       final player = activePlayers[i];
-      final bet = player.currentBet;
+      final bet = player.totalBetThisRound;
       if (bet > currentLevel) {
         final diff = bet - currentLevel;
         final sidePotAmount = diff * remainingPlayers;

@@ -13,6 +13,7 @@ class Player {
   bool isSmallBlind = false;
   bool isBigBlind = false;
   bool isActive = true; // 是否还在牌局中（未弃牌且未全下？实际由hasFolded和isAllIn综合判断，但保留）
+  bool hasActedThisRound = false; // 本下注轮中是否已行动过
 
   Player({required this.id, required this.name, required this.chips});
 
@@ -27,6 +28,7 @@ class Player {
     isSmallBlind = false;
     isBigBlind = false;
     isActive = true;
+    hasActedThisRound = false;
   }
 
   /// 下注：从筹码中扣除，并增加本回合下注额

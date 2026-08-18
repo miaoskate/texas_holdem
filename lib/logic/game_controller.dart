@@ -42,7 +42,11 @@ class GameController extends ChangeNotifier {
   List<Player>? winners;
   Map<int, int>? winAmounts;   // 可空，使用时需判空或初始化
 
-  GameController({required this.config, required List<String> playerNames}) {
+  final int? humanPlayerId;    // 人类玩家ID（单机模式）
+  bool gameOver = false;       // 整局游戏是否结束
+  Player? gameWinner;          // 游戏结束时获胜/筹码领先的玩家
+
+  GameController({required this.config, required List<String> playerNames, this.humanPlayerId}) {
     _initPlayers(playerNames);
   }
 
@@ -92,6 +96,7 @@ class GameController extends ChangeNotifier {
 
   /// 开始一手新牌
   void startNewHand() {
+    if (gameOver) return;
     // 重置玩家状态（保留筹码）
     for (var p in players) p.resetForNewHand();
     deck = Deck()..shuffle();
@@ -177,13 +182,15 @@ class GameController extends ChangeNotifier {
 
       case ActionType.raise:
         final total = amount;
-        if (total <= player.currentBet + minRaise) throw Exception('加注至少为 ${player.currentBet + minRaise}');
+        // 加注后的总下注额必须至少为：当前最高下注 + 最小加注额
+        if (total < roundBet + minRaise) throw Exception('加注至少到 ${roundBet + minRaise}');
         if (total > player.chips + player.currentBet) throw Exception('筹码不足');
         final raiseAmount = total - player.currentBet;
+        final raiseSize = total - roundBet; // 本次加注增量，作为新的最小加注额
         player.placeBet(raiseAmount);
         pot.totalAmount += raiseAmount;
         roundBet = total;
-        minRaise = total - player.currentBet;
+        minRaise = raiseSize;
         desc = '${player.name} 加注到 $total';
         actionHistory.add(ActionRecord(playerId: playerId, action: action, amount: raiseAmount, description: desc));
         _advanceToNextPlayer();
@@ -202,6 +209,7 @@ class GameController extends ChangeNotifier {
         break;
     }
 
+    player.hasActedThisRound = true;
     _checkRoundComplete();
     notifyListeners();
   }
@@ -224,78 +232,80 @@ class GameController extends ChangeNotifier {
 
   bool _canAct(Player p) => p.isInHand && !p.isAllIn && p.chips > 0;
 
-  /// 检查本轮是否结束
+  /// 检查本轮是否结束：所有可行动玩家都已行动且下注相等
   void _checkRoundComplete() {
     if (handOver) return;
 
-    // 如果只剩一位活跃玩家，直接获胜
+    // 如果只剩一位未弃牌玩家，直接获胜
     final active = players.where((p) => p.isInHand).toList();
     if (active.length <= 1) {
       _endHandWithWinner(active.isNotEmpty ? active.first : null);
       return;
     }
 
-    // 检查是否所有可行动的玩家都已行动且下注相等
+    // 没有可行动的玩家（全部全下），直接推进阶段
     final canActPlayers = players.where(_canAct).toList();
     if (canActPlayers.isEmpty) {
-      // 没有可行动的玩家（全部全下或弃牌），进入摊牌
       _advancePhase();
       return;
     }
 
-    // 如果所有可行动玩家都已行动（即 actionCount 已达到可行动人数），并且下注相等，则阶段结束
-    // 我们维护一个简单的计数器：每次 action 后递增，但加注会重置
-    // 更可靠的方法：检查是否每个人都已行动且下注相等
-    final allActed = canActPlayers.every((p) => p.currentBet == roundBet);
-    if (allActed) {
+    // 本轮结束条件：所有可行动玩家都已行动，且下注额都与当前最高下注相等。
+    // 翻牌前大盲因 hasActedThisRound 尚为 false，自然获得最后的行动权（过牌或加注）；
+    // 有人加注后，其他玩家 currentBet < roundBet，需要重新行动。
+    final roundComplete = canActPlayers
+        .every((p) => p.hasActedThisRound && p.currentBet == roundBet);
+    if (roundComplete) {
       _advancePhase();
     }
   }
 
-  /// 进入下一阶段
+  /// 进入下一阶段，循环推进直到有可行动的玩家或游戏结束
   void _advancePhase() {
-    switch (phase) {
-      case GamePhase.preflop:
-        // 发翻牌
-        communityCards = [deck.deal(), deck.deal(), deck.deal()];
-        phase = GamePhase.flop;
-        _resetForNewRound();
-        break;
-      case GamePhase.flop:
-        communityCards.add(deck.deal());
-        phase = GamePhase.turn;
-        _resetForNewRound();
-        break;
-      case GamePhase.turn:
-        communityCards.add(deck.deal());
-        phase = GamePhase.river;
-        _resetForNewRound();
-        break;
-      case GamePhase.river:
-        phase = GamePhase.showdown;
-        _showdown();
-        break;
-      default:
-        break;
-    }
-    notifyListeners();
-  }
+    while (!handOver) {
+      switch (phase) {
+        case GamePhase.preflop:
+          communityCards = [deck.deal(), deck.deal(), deck.deal()];
+          phase = GamePhase.flop;
+          break;
+        case GamePhase.flop:
+          communityCards.add(deck.deal());
+          phase = GamePhase.turn;
+          break;
+        case GamePhase.turn:
+          communityCards.add(deck.deal());
+          phase = GamePhase.river;
+          break;
+        case GamePhase.river:
+          phase = GamePhase.showdown;
+          _showdown();
+          return; // _showdown 会调用 notifyListeners
+        default:
+          return;
+      }
 
-  /// 重置一轮（清除下注，更新盲注等）
-  void _resetForNewRound() {
-    // 重置所有玩家当前下注
-    for (var p in players) p.currentBet = 0;
-    roundBet = 0;
-    minRaise = config.bigBlind;
-    // 从庄家下家开始
-    currentPlayerIndex = (dealerIndex + 1) % players.length;
-    _skipToNextActivePlayer();
+      // 重置本轮下注状态，从庄家下家（小盲位）开始新一轮行动
+      for (var p in players) {
+        p.currentBet = 0;
+        p.hasActedThisRound = false;
+      }
+      roundBet = 0;
+      minRaise = config.bigBlind;
+      currentPlayerIndex = (dealerIndex + 1) % players.length;
+      _skipToNextActivePlayer();
+
+      // 可下注玩家不足2人（其余全下或弃牌）时无法再下注，
+      // 继续发完剩余公共牌直到摊牌
+      if (players.where(_canAct).length >= 2) {
+        notifyListeners();
+        return;
+      }
+    }
   }
 
   void _skipToNextActivePlayer() {
-    int start = currentPlayerIndex;
     int attempts = 0;
-    while (!_canAct(players[currentPlayerIndex])) {
+    while (currentPlayerIndex >= 0 && !_canAct(players[currentPlayerIndex])) {
       currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
       attempts++;
       if (attempts > players.length) {
@@ -303,10 +313,7 @@ class GameController extends ChangeNotifier {
         break;
       }
     }
-    if (currentPlayerIndex == -1) {
-      // 没有可行动的玩家，直接摊牌
-      _advancePhase();
-    }
+    // 不再在此处调用 _advancePhase，避免递归级联
   }
 
   /// 摊牌
@@ -340,9 +347,10 @@ class GameController extends ChangeNotifier {
     winners = winnersList;
     winAmounts = {};
     for (var p in winnersList) {
-      winAmounts![p.id] = p.chips; // 注意：这里 winAmounts! 是安全的，因为刚赋值
+      winAmounts![p.id] = p.chips;
     }
     notifyListeners();
+    _autoStartNextHand();
   }
 
   /// 分配底池（含边池）
@@ -379,5 +387,38 @@ class GameController extends ChangeNotifier {
       handOver = true;
     }
     notifyListeners();
+    _autoStartNextHand();
+  }
+
+  /// 自动开始下一手牌；玩家破产或分出胜负时结束整局游戏
+  void _autoStartNextHand() {
+    final playersWithChips = players.where((p) => p.chips > 0).toList();
+
+    // 人类玩家筹码归零，游戏结束（失败）
+    if (humanPlayerId != null) {
+      final human = players.where((p) => p.id == humanPlayerId).toList();
+      if (human.isNotEmpty && human.first.chips == 0) {
+        gameOver = true;
+        gameWinner = playersWithChips.isNotEmpty
+            ? playersWithChips.reduce((a, b) => a.chips >= b.chips ? a : b)
+            : null;
+        notifyListeners();
+        return;
+      }
+    }
+
+    // 只剩一位玩家有筹码，游戏结束（分出胜负）
+    if (playersWithChips.length < 2) {
+      gameOver = true;
+      gameWinner = playersWithChips.length == 1 ? playersWithChips.first : null;
+      notifyListeners();
+      return;
+    }
+
+    // 延迟启动下一手牌，让UI有时间显示结果
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (!hasListeners || gameOver) return;
+      startNewHand();
+    });
   }
 }

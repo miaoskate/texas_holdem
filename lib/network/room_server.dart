@@ -291,6 +291,7 @@ class RoomServer {
 
   List<ClientConnection> get clients => List.unmodifiable(_clients);
   bool get isGameStarted => _gameStarted;
+  GameController? get gameController => _gameController;
 
   void close() {
     for (var client in _clients) {
