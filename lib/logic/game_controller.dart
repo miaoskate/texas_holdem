@@ -415,8 +415,8 @@ class GameController extends ChangeNotifier {
       return;
     }
 
-    // 延迟启动下一手牌，让UI有时间显示结果
-    Future.delayed(const Duration(milliseconds: 1500), () {
+    // 延迟启动下一手牌：保留 3 秒展示赢家高亮（金色边框）后再开始
+    Future.delayed(const Duration(milliseconds: 3000), () {
       if (!hasListeners || gameOver) return;
       startNewHand();
     });
