@@ -79,15 +79,25 @@ class Card {
 
   Card(this.rank, this.suit);
 
-  /// 例如 "As", "Kd", "10h"
+  /// 例如 "As", "Kd", "10h", "Ts"
   @override
   String toString() => '${rank.toString()}${suit.toString()}';
 
-  /// 从字符串解析，如 "As" -> Ace of Spades
+  /// 从字符串解析，支持 "10h" 和 "Th" 两种格式
   static Card fromString(String s) {
     if (s.length < 2) throw FormatException('Invalid card string: $s');
-    String rankStr = s.substring(0, s.length - 1);
-    String suitStr = s.substring(s.length - 1);
+
+    String rankStr;
+    String suitStr;
+
+    // 处理两位数字的 rank（如 "10"）或缩写 "T"
+    if (s.length >= 3 && s.substring(0, 2) == '10') {
+      rankStr = '10';
+      suitStr = s.substring(2);
+    } else {
+      rankStr = s.substring(0, 1);
+      suitStr = s.substring(1);
+    }
 
     Rank rank;
     switch (rankStr) {
@@ -116,6 +126,7 @@ class Card {
         rank = Rank.nine;
         break;
       case '10':
+      case 'T':
         rank = Rank.ten;
         break;
       case 'J':

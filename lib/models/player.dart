@@ -52,8 +52,6 @@ class Player {
     return all;
   }
 
-  /// 是否仍在牌局中（未弃牌且未全下？全下也算在牌局中，但不再行动）
-  bool get isStillInHand => !hasFolded && chips > 0; // 未弃牌且还有筹码（但全下后筹码为0，仍参与）
-  // 更准确：未弃牌
+  /// 是否仍在牌局中（未弃牌）
   bool get isInHand => !hasFolded;
 }
